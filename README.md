@@ -1,45 +1,75 @@
 # 🚗 Vehicle Analytics System
 
-An AI-powered **Vehicle Analytics System** that uses Computer Vision and Deep Learning to detect, track, classify, and analyze vehicles from traffic video streams. The system provides real-time vehicle monitoring, traffic statistics, and an interactive analytics dashboard.
+An AI-powered real-time Vehicle Analytics System that uses **YOLO11, OpenCV, FastAPI, React, and PostgreSQL** to detect, track, count, and analyze vehicles from traffic video footage.
 
-## 📌 Project Overview
-
-The Vehicle Analytics System combines YOLO11 object detection, Python, FastAPI, PostgreSQL, and React to monitor traffic and generate meaningful vehicle analytics.
-
-It is designed to detect different types of vehicles, track their movement, count vehicles crossing a virtual line, and store vehicle information in a database for further analysis.
+The system provides a modern React dashboard where users can start and stop vehicle detection, watch annotated video footage, monitor live vehicle counts, and view analytics.
 
 ## ✨ Features
 
-- **Vehicle Detection:** Detects vehicles using the YOLO11 deep learning model.
-- **Vehicle Classification:** Identifies vehicle categories such as cars, buses, trucks, and motorcycles.
-- **Vehicle Tracking:** Tracks detected vehicles across video frames.
-- **Vehicle Counting:** Counts vehicles crossing a virtual counting line.
-- **Direction Detection:** Identifies vehicle movement direction (UP/DOWN).
-- **Vehicle Color Detection:** Identifies vehicle colors.
-- **Database Integration:** Stores vehicle detection records in PostgreSQL.
-- **REST API:** Uses FastAPI to connect the detection system with the frontend.
-- **Interactive Dashboard:** Displays vehicle analytics using React.
-- **Data Visualization:** Provides charts and statistics for traffic analysis.
-- **Video Analytics:** Processes traffic videos for vehicle monitoring.
-- **NVIDIA DeepStream Configuration:** Includes configuration files for YOLO11-based DeepStream inference and analytics.
-- **Media Streaming Configuration:** Includes MediaMTX configuration for video streaming workflows.
+### 1. AI-Based Vehicle Detection
+- Detects vehicles using the YOLO11n object detection model.
+- Identifies four vehicle categories:
+  - Cars
+  - Motorcycles
+  - Buses
+  - Trucks
+- Uses OpenCV for video processing.
+
+### 2. Vehicle Tracking
+- Tracks detected vehicles using ByteTrack.
+- Assigns tracking IDs to detected vehicles.
+- Identifies vehicle movement across a predefined counting line.
+
+### 3. Live Vehicle Counting
+- Counts unique detected vehicles.
+- Tracks vehicle crossings.
+- Displays live statistics for:
+  - Total vehicles
+  - Cars
+  - Buses
+  - Trucks
+  - Motorcycles
+  - Active vehicles
+  - Total crossings
+
+### 4. Live Video Streaming
+- Displays processed traffic footage directly on the React dashboard.
+- Shows bounding boxes around detected vehicles.
+- Displays vehicle IDs, vehicle types, and estimated colors.
+- Streams annotated video from the FastAPI backend.
+- No separate OpenCV output window is required.
+
+### 5. Interactive Dashboard
+- Start Detection button to start vehicle detection.
+- Stop Detection button to stop vehicle detection.
+- Live vehicle statistics.
+- Vehicle type analytics.
+- Vehicle color analytics.
+- Recent vehicle crossing events.
+- Direction-wise vehicle analytics.
+- Automatic dashboard data refresh.
+
+### 6. PostgreSQL Database Integration
+- Stores detected vehicle information.
+- Stores vehicle crossing events.
+- Retrieves stored data for dashboard analytics.
+- Maintains historical vehicle information.
 
 ## 🛠️ Technologies Used
 
 | Technology | Purpose |
 |---|---|
-| Python | Backend development and vehicle detection |
-| YOLO11 | Vehicle object detection |
-| OpenCV | Video processing and computer vision |
-| ONNX | Deep learning model format |
-| NVIDIA DeepStream | GPU-accelerated video analytics |
-| FastAPI | REST API development |
+| Python | Backend and detection logic |
+| YOLO11n | Vehicle detection |
+| OpenCV | Video processing and annotation |
+| ByteTrack | Vehicle tracking |
+| FastAPI | Backend API and video streaming |
 | PostgreSQL | Database management |
-| React.js | Frontend development |
+| React.js | Frontend dashboard |
 | JavaScript | Frontend functionality |
 | Recharts | Data visualization |
-| CSS | Dashboard styling |
-| MediaMTX | Media streaming |
+| Lucide React | Dashboard icons |
+| HTML5 & CSS3 | Dashboard design |
 
 ## 📂 Project Structure
 
@@ -47,49 +77,48 @@ It is designed to detect different types of vehicles, track their movement, coun
 Vehicle-Analytics-System/
 │
 ├── backend/
-│   └── main.py
+│   ├── main.py
+│   └── stream_manager.py
 │
 ├── database/
 │   └── db_connection.py
 │
-├── deepstream/
-│   ├── configs/
-│   │   ├── config_infer_primary_yolo11.txt
-│   │   ├── config_nvdsanalytics.txt
-│   │   ├── config_tracker.txt
-│   │   └── deepstream_app_config.txt
-│   │
-│   ├── src/
-│   │   └── nvdsparse_yolo11.cpp
-│   │
-│   └── labels.txt
-│
 ├── detection/
-│   ├── vehicle_detector.py
-│   └── yolo11n.onnx
+│   └── vehicle_detector.py
 │
 ├── frontend/
-│   ├── public/
 │   ├── src/
-│   │   ├── assets/
 │   │   ├── App.jsx
 │   │   ├── App.css
-│   │   ├── index.css
 │   │   └── main.jsx
-│   │
 │   ├── package.json
-│   └── vite.config.js
+│   └── index.html
 │
 ├── videos/
 │   └── traffic.webm
 │
-├── mediamtx.yml
+├── outputs/
+│   ├── vehicle_detection.mp4
+│   └── line_crossing_events.csv
+│
+├── venv/
 ├── .gitignore
-├── LICENSE
-└── README.md
+├── README.md
+└── requirements.txt
 ```
 
+*Generated files and local environment folders may be excluded from Git using `.gitignore`.*
+
 ## ⚙️ Installation and Setup
+
+### Prerequisites
+
+Install the following before running the project:
+
+- Python 3.10 or later
+- Node.js and npm
+- PostgreSQL
+- Git
 
 ### 1. Clone the Repository
 
@@ -103,58 +132,58 @@ Navigate into the project:
 cd Vehicle-Analytics-System
 ```
 
-### 2. Create a Python Virtual Environment
+### 2. Create and Activate Python Virtual Environment
 
 ```bash
 python -m venv venv
 ```
 
-Activate the environment on Windows:
+For Windows PowerShell:
 
 ```powershell
-venv\Scripts\activate
+.\venv\Scripts\Activate.ps1
 ```
 
 ### 3. Install Python Dependencies
 
 ```bash
-pip install ultralytics opencv-python numpy fastapi uvicorn psycopg2-binary
+pip install -r requirements.txt
 ```
-
-Install any additional dependencies required by your project.
 
 ### 4. Configure PostgreSQL
 
-1. Install PostgreSQL.
-2. Create a database for the project.
-3. Configure your database connection in `database/db_connection.py`.
-4. Ensure the database server is running before starting vehicle detection.
+- Install and start PostgreSQL.
+- Create the database required by the project.
+- Configure your database connection settings in `database/db_connection.py`.
+- Ensure the required database tables are available.
 
-### 5. Run Vehicle Detection
+### 5. Prepare the Traffic Video
+
+Place your traffic video inside the `videos` folder.
+
+The default input video is:
+
+```text
+videos/traffic.webm
+```
+
+The YOLO11n model weights (`yolo11n.pt`) should also be available to the detection script. Ultralytics can download the weights when they are not already present.
+
+### 6. Start the FastAPI Backend
 
 From the project root directory:
 
 ```bash
-python detection/vehicle_detector.py
+python -m uvicorn backend.main:app --reload
 ```
 
-The detection system processes the traffic video and records vehicle information in PostgreSQL.
-
-### 6. Start the FastAPI Backend
-
-Open another terminal, activate the virtual environment, and run:
-
-```bash
-uvicorn backend.main:app --reload
-```
-
-Backend API:
+Backend URL:
 
 ```text
 http://127.0.0.1:8000
 ```
 
-FastAPI interactive documentation:
+API documentation:
 
 ```text
 http://127.0.0.1:8000/docs
@@ -162,117 +191,113 @@ http://127.0.0.1:8000/docs
 
 ### 7. Start the React Frontend
 
-Navigate to the frontend directory:
+Open another terminal:
 
 ```bash
 cd frontend
 ```
 
-Install dependencies:
+Install frontend dependencies:
 
 ```bash
 npm install
 ```
 
-Start the development server:
+Start the React development server:
 
 ```bash
 npm run dev
 ```
 
-Open the local URL displayed in your terminal (usually):
+Open the dashboard in your browser using the URL displayed by Vite, usually:
 
 ```text
 http://localhost:5173
 ```
 
-## 📊 System Architecture
+## ▶️ How to Use
+
+1. Start PostgreSQL.
+2. Run the FastAPI backend.
+3. Start the React frontend.
+4. Open the dashboard in your browser.
+5. Click **Start Detection**.
+6. Watch the processed traffic video directly on the dashboard.
+7. Monitor vehicle detection, tracking, and live counts.
+8. View vehicle analytics and recent crossing events.
+9. Click **Stop Detection** when you want to stop processing.
+
+## 🔗 Main API Endpoints
+
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/` | Backend health check |
+| GET | `/analytics/summary` | Vehicle summary |
+| GET | `/analytics/colors` | Vehicle color analytics |
+| GET | `/analytics/types` | Vehicle type analytics |
+| GET | `/analytics/recent` | Recent crossing events |
+| POST | `/events/crossing` | Save crossing event |
+| POST | `/detection/start` | Start vehicle detection |
+| POST | `/detection/stop` | Stop vehicle detection |
+| GET | `/detection/stream` | Stream annotated video |
+| GET | `/detection/stats` | Get live detection statistics |
+
+## 📊 System Workflow
 
 ```text
-       Traffic Video / Camera
-                 |
-                 v
-          YOLO11 Detection
-                 |
-                 v
-          Vehicle Tracking
-                 |
-                 v
-       Vehicle Classification
-                 |
-                 v
-       Direction and Line Counting
-                 |
-                 v
-          PostgreSQL Database
-                 |
-                 v
-             FastAPI
-                 |
-                 v
-           React Dashboard
-                 |
-                 v
-        Traffic Analytics
+Traffic Video
+     |
+     v
+YOLO11 Vehicle Detection
+     |
+     v
+ByteTrack Vehicle Tracking
+     |
+     v
+Vehicle Classification
+     |
+     v
+Vehicle Counting and Line Crossing
+     |
+     v
+FastAPI Backend
+     |
+     +------------------+
+     |                  |
+     v                  v
+PostgreSQL        Live Video Stream
+     |                  |
+     v                  v
+Analytics API     React Dashboard
+     |                  |
+     +--------+---------+
+              |
+              v
+       Vehicle Analytics
 ```
 
-## 📈 Dashboard Analytics
+## 🎯 Project Objective
 
-The React dashboard is designed to present vehicle information through visual charts and statistics.
+The main objective of this project is to develop an AI-powered traffic monitoring and analytics system that automates vehicle detection, tracking, counting, and data analysis.
 
-Analytics include:
+It demonstrates how computer vision, machine learning, backend development, database management, and frontend technologies can work together to build a practical intelligent transportation application.
 
-- Total vehicles detected.
-- Vehicle category distribution.
-- Car, bus, truck, and motorcycle counts.
-- Vehicle movement direction.
-- Vehicle color information.
-- Traffic monitoring statistics.
+## 🚀 Future Improvements
 
-## 🧠 Deep Learning Model
-
-This project uses the YOLO11 object detection architecture.
-
-**Model:** YOLO11n (ONNX format)
-
-**Model file:** `detection/yolo11n.onnx`
-
-YOLO11 is used for identifying objects in traffic video frames. The ONNX model is also included in the DeepStream inference configuration.
-
-## 🚀 Future Enhancements
-
-- Real-time CCTV camera integration.
-- Live traffic monitoring.
-- Traffic congestion detection.
+- Real-time detection from CCTV cameras.
+- Multiple camera support.
+- Traffic congestion monitoring.
 - Vehicle speed estimation.
-- Number plate recognition (ANPR).
-- Accident detection.
-- Traffic violation detection.
-- Advanced traffic reporting.
-- Multi-camera vehicle tracking.
-- Cloud-based deployment.
-
-## 💻 Requirements
-
-- Python 3.10 or later (use a version compatible with the selected dependencies).
-- Node.js and npm.
-- PostgreSQL.
-- OpenCV-compatible video input.
-- YOLO11 model in ONNX format.
-- NVIDIA GPU and compatible DeepStream environment for GPU-accelerated DeepStream execution.
-
-**Note:** The Python/OpenCV detection workflow and NVIDIA DeepStream workflow have different environment requirements. DeepStream generally requires a compatible NVIDIA GPU, drivers, CUDA, and supported DeepStream installation.
+- Number plate recognition.
+- Downloadable analytics reports.
+- Advanced traffic pattern analysis.
 
 ## 👩‍💻 Author
 
-**Priyanka Anil Sapkal**
+**Priyanka Sapkal**
 
-GitHub: https://github.com/priyanka-sapkal101/Vehicle-Analytics-System
-
-## 📜 License
-
-This project is licensed under the terms specified in the [LICENSE](LICENSE) file.
+GitHub: [priyanka-sapkal101](https://github.com/priyanka-sapkal101)
 
 ---
 
-⭐ If you find this project interesting, consider giving it a star on GitHub!
+⭐ If you find this project interesting, consider giving the repository a star!
