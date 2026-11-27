@@ -1,23 +1,36 @@
+
 import cv2
 import csv
 import sys
+import time
+import numpy as np
+
 from pathlib import Path
 from datetime import datetime
 from ultralytics import YOLO
 
-# Import PostgreSQL database function
+# --------------------------------------------------
+# PROJECT CONFIGURATION
+# --------------------------------------------------
+
 BASE_DIR = Path(__file__).resolve().parent.parent
+
 sys.path.insert(0, str(BASE_DIR))
 
 from database.db_connection import save_crossing_event, save_vehicle
 
-# Project paths
-BASE_DIR = Path(__file__).resolve().parent.parent
+
 VIDEO_PATH = BASE_DIR / "videos" / "traffic.webm"
+
 OUTPUT_PATH = BASE_DIR / "outputs" / "vehicle_detection.mp4"
+
 CSV_PATH = BASE_DIR / "outputs" / "line_crossing_events.csv"
 
-# COCO vehicle class IDs
+
+# --------------------------------------------------
+# VEHICLE CLASSES
+# --------------------------------------------------
+
 VEHICLE_CLASSES = {
     2: "Car",
     3: "Motorcycle",
@@ -25,15 +38,23 @@ VEHICLE_CLASSES = {
     7: "Truck"
 }
 
-# Counting line position (percentage of frame height)
+
+# --------------------------------------------------
+# DETECTION SETTINGS
+# --------------------------------------------------
+
 LINE_POSITION = 0.55
 
+CONFIDENCE = 0.40
 
+FRAME_SIZE = 640
+
+
+# --------------------------------------------------
+# VEHICLE COLOR CLASSIFICATION
+# --------------------------------------------------
 
 def classify_vehicle_color(vehicle_crop):
-    """
-    Estimate dominant vehicle colour using HSV masks.
-    """
 
     if vehicle_crop is None or vehicle_crop.size == 0:
         return "Unknown"
@@ -43,9 +64,10 @@ def classify_vehicle_color(vehicle_crop):
     if height < 10 or width < 10:
         return "Unknown"
 
-    # Crop the central body area
+    # Crop central body area
     x1 = int(width * 0.15)
     x2 = int(width * 0.85)
+
     y1 = int(height * 0.25)
     y2 = int(height * 0.75)
 
@@ -54,54 +76,63 @@ def classify_vehicle_color(vehicle_crop):
     if center_crop.size == 0:
         return "Unknown"
 
-    # Resize for more stable colour estimation
     center_crop = cv2.resize(center_crop, (100, 100))
 
     hsv = cv2.cvtColor(center_crop, cv2.COLOR_BGR2HSV)
 
-    import numpy as np
-
-    # HSV colour ranges
     masks = {
+
         "Red": (
-            cv2.inRange(hsv, np.array([0, 80, 50]),
-                        np.array([10, 255, 255])) |
-            cv2.inRange(hsv, np.array([170, 80, 50]),
-                        np.array([180, 255, 255]))
+            cv2.inRange(
+                hsv,
+                np.array([0, 80, 50]),
+                np.array([10, 255, 255])
+            )
+            |
+            cv2.inRange(
+                hsv,
+                np.array([170, 80, 50]),
+                np.array([180, 255, 255])
+            )
         ),
 
         "Yellow": cv2.inRange(
-            hsv, np.array([15, 80, 80]),
+            hsv,
+            np.array([15, 80, 80]),
             np.array([35, 255, 255])
         ),
 
         "Green": cv2.inRange(
-            hsv, np.array([36, 50, 40]),
+            hsv,
+            np.array([36, 50, 40]),
             np.array([85, 255, 255])
         ),
 
         "Blue": cv2.inRange(
-            hsv, np.array([90, 60, 40]),
+            hsv,
+            np.array([90, 60, 40]),
             np.array([135, 255, 255])
         ),
 
         "White": cv2.inRange(
-            hsv, np.array([0, 0, 170]),
+            hsv,
+            np.array([0, 0, 170]),
             np.array([180, 65, 255])
         ),
 
         "Black": cv2.inRange(
-            hsv, np.array([0, 0, 0]),
+            hsv,
+            np.array([0, 0, 0]),
             np.array([180, 255, 55])
         ),
 
         "Silver/Grey": cv2.inRange(
-            hsv, np.array([0, 0, 56]),
+            hsv,
+            np.array([0, 0, 56]),
             np.array([180, 65, 169])
         )
     }
 
-    # Calculate percentage of each colour
     total_pixels = hsv.shape[0] * hsv.shape[1]
 
     percentages = {
@@ -111,301 +142,460 @@ def classify_vehicle_color(vehicle_crop):
 
     best_color = max(percentages, key=percentages.get)
 
-    # Avoid assigning a colour when no mask is sufficiently dominant
     if percentages[best_color] < 8:
         return "Other"
 
     return best_color
 
 
-def main():
-    if not VIDEO_PATH.exists():
-        print(f"Video not found: {VIDEO_PATH}")
-        return
+# --------------------------------------------------
+# MAIN DETECTION FUNCTION
+# --------------------------------------------------
 
-    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+def run_detection(stop_event, publish_frame, publish_stats):
 
     print("Loading YOLO model...")
+
     model = YOLO("yolo11n.pt")
 
     print("Opening traffic video...")
+
     cap = cv2.VideoCapture(str(VIDEO_PATH))
 
     if not cap.isOpened():
-        print("ERROR: Could not open video.")
-        return
+        raise RuntimeError(
+            f"Could not open video: {VIDEO_PATH}"
+        )
 
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-
-    # Horizontal counting line
-    counting_line_y = int(height * LINE_POSITION)
-
-    writer = cv2.VideoWriter(
-        str(OUTPUT_PATH),
-        cv2.VideoWriter_fourcc(*"mp4v"),
-        fps,
-        (width, height)
+    # Create output directories
+    OUTPUT_PATH.parent.mkdir(
+        parents=True,
+        exist_ok=True
     )
 
-    if not writer.isOpened():
-        print("ERROR: Could not create output video.")
-        cap.release()
-        return
+    # Video properties
+    fps = cap.get(cv2.CAP_PROP_FPS)
 
-    vehicle_ids = set()
+    if fps <= 0:
+        fps = 25
+
+    frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+
+    frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+    # Output video writer
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+
+    video_writer = cv2.VideoWriter(
+        str(OUTPUT_PATH),
+        fourcc,
+        fps,
+        (frame_width, frame_height)
+    )
+
+    # CSV file
+    csv_file = open(
+        CSV_PATH,
+        "w",
+        newline="",
+        encoding="utf-8"
+    )
+
+    csv_writer = csv.writer(csv_file)
+
+    csv_writer.writerow([
+        "Vehicle ID",
+        "Vehicle Type",
+        "Vehicle Color",
+        "Direction",
+        "Timestamp"
+    ])
+
+    # --------------------------------------------------
+    # TRACKING DATA
+    # --------------------------------------------------
+
+    counted_vehicles = set()
+
+    saved_vehicles = set()
+
+    crossed_vehicles = set()
+
+    previous_positions = {}
+
+    vehicle_colors = {}
 
     vehicle_counts = {
         "Car": 0,
-        "Motorcycle": 0,
         "Bus": 0,
-        "Truck": 0
+        "Truck": 0,
+        "Motorcycle": 0
     }
 
-    # Store previous centre positions
-    previous_positions = {}
+    total_crossings = 0
 
-    # Prevent counting the same tracked ID more than once
-    counted_ids = set()
-    saved_vehicle_ids = set()
+    total_vehicles = 0
 
-    crossing_events = []
+    print("Vehicle detection started!")
 
-    print("Vehicle detection and line counting started!")
-    print("Press Q to stop.")
+    try:
 
-    while True:
-        success, frame = cap.read()
+        # --------------------------------------------------
+        # VIDEO PROCESSING LOOP
+        # --------------------------------------------------
 
-        if not success:
-            break
+        while not stop_event.is_set():
 
-        results = model.track(
-            frame,
-            persist=True,
-            tracker="bytetrack.yaml",
-            classes=list(VEHICLE_CLASSES.keys()),
-            conf=0.40,
-            imgsz=640,
-            verbose=False
-        )
+            ret, frame = cap.read()
 
-        annotated_frame = frame.copy()
+            if not ret:
+                print("Video processing completed.")
+                break
 
-        for result in results:
-            boxes = result.boxes
+            results = model.track(
+                frame,
+                persist=True,
+                tracker="bytetrack.yaml",
+                classes=list(VEHICLE_CLASSES.keys()),
+                conf=CONFIDENCE,
+                imgsz=FRAME_SIZE,
+                verbose=False
+            )
 
-            if boxes is None:
-                continue
+            annotated_frame = frame.copy()
 
-            for box in boxes:
-                class_id = int(box.cls[0])
-                vehicle_name = VEHICLE_CLASSES[class_id]
+            line_y = int(frame_height * LINE_POSITION)
 
-                x1, y1, x2, y2 = map(
-                    int, box.xyxy[0].tolist()
-                )
-                
-                
-                vehicle_crop = frame[y1:y2, x1:x2]
+            # Draw counting line
+            cv2.line(
+                annotated_frame,
+                (0, line_y),
+                (frame_width, line_y),
+                (0, 0, 255),
+                2
+            )
 
-                
-                            
-                vehicle_color = classify_vehicle_color(vehicle_crop)
+            current_visible = 0
 
-                track_id = None
+            # --------------------------------------------------
+            # PROCESS DETECTIONS
+            # --------------------------------------------------
 
-                if box.id is not None:
-                    track_id = int(box.id[0])
+            if results and results[0].boxes is not None:
 
-                    # Count each unique vehicle only once
-                    if track_id not in vehicle_ids:
-                        vehicle_ids.add(track_id)
-                        vehicle_counts[vehicle_name] += 1
+                boxes = results[0].boxes
 
-                    # Save each unique vehicle to PostgreSQL
-                    if track_id not in saved_vehicle_ids:
-                        if save_vehicle(track_id, vehicle_name, vehicle_color):
-                            saved_vehicle_ids.add(track_id)
-                            print(f"Saved vehicle {track_id} to PostgreSQL")
+                for box in boxes:
 
+                    if box.id is None:
+                        continue
 
-                # Vehicle centre point
-                center_x = (x1 + x2) // 2
-                center_y = (y1 + y2) // 2
+                    vehicle_id = int(box.id[0])
 
-                if track_id is not None:
-                    previous_y = previous_positions.get(track_id)
+                    class_id = int(box.cls[0])
 
-                    if previous_y is not None and track_id not in counted_ids:
+                    vehicle_type = VEHICLE_CLASSES.get(
+                        class_id,
+                        "Unknown"
+                    )
 
-                        direction = None
+                    if vehicle_type == "Unknown":
+                        continue
 
-                        if previous_y < counting_line_y <= center_y:
-                            direction = "DOWN"
+                    x1, y1, x2, y2 = map(
+                        int,
+                        box.xyxy[0].tolist()
+                    )
 
-                        elif previous_y > counting_line_y >= center_y:
-                            direction = "UP"
+                    # Keep coordinates inside frame
+                    x1 = max(0, min(x1, frame_width - 1))
+                    x2 = max(0, min(x2, frame_width))
+                    y1 = max(0, min(y1, frame_height - 1))
+                    y2 = max(0, min(y2, frame_height))
 
-                        if direction:
-                            counted_ids.add(track_id)
+                    if x2 <= x1 or y2 <= y1:
+                        continue
 
-                            event = {
-                                "vehicle_id": track_id,
-                                "vehicle_type": vehicle_name,
-                                "vehicle_color": vehicle_color,
-                                "direction": direction,
-                                "timestamp": datetime.now().isoformat(
-                                    timespec="seconds"
-                                )
-                            }
-                            
-                            crossing_events.append(event)
+                    current_visible += 1
 
-                            # Save vehicle crossing event to PostgreSQL
-                            save_crossing_event(event)
+                    center_x = (x1 + x2) // 2
+
+                    center_y = (y1 + y2) // 2
+
+                    # --------------------------------------------------
+                    # VEHICLE COLOR
+                    # --------------------------------------------------
+
+                    if vehicle_id not in vehicle_colors:
+
+                        vehicle_crop = frame[y1:y2, x1:x2]
+
+                        vehicle_colors[vehicle_id] = (
+                            classify_vehicle_color(vehicle_crop)
+                        )
+
+                    vehicle_color = vehicle_colors[vehicle_id]
+
+                    # --------------------------------------------------
+                    # SAVE UNIQUE VEHICLE
+                    # --------------------------------------------------
+
+                    if vehicle_id not in saved_vehicles:
+
+                        saved_vehicles.add(vehicle_id)
+
+                        total_vehicles += 1
+
+                        vehicle_counts[vehicle_type] += 1
+
+                        vehicle_data = {
+                            "vehicle_id": vehicle_id,
+                            "vehicle_type": vehicle_type,
+                            "vehicle_color": vehicle_color
+                        }
+
+                        try:
+
+                            save_vehicle(vehicle_data)
 
                             print(
-                                f"Vehicle {track_id} crossed "
-                                f"{direction}: {vehicle_name} ({vehicle_color})"
+                                f"Saved vehicle {vehicle_id}: "
+                                f"{vehicle_type} ({vehicle_color})"
+                            )
+
+                        except Exception as error:
+
+                            print(
+                                "Vehicle database error:",
+                                error
+                            )
+
+                    # --------------------------------------------------
+                    # LINE CROSSING DETECTION
+                    # --------------------------------------------------
+
+                    previous_y = previous_positions.get(vehicle_id)
+
+                    if previous_y is not None:
+
+                        crossed = (
+                            previous_y < line_y <= center_y
+                            or
+                            previous_y > line_y >= center_y
+                        )
+
+                        if crossed and vehicle_id not in crossed_vehicles:
+
+                            crossed_vehicles.add(vehicle_id)
+
+                            direction = (
+                                "DOWN"
+                                if center_y > previous_y
+                                else "UP"
+                            )
+
+                            event_time = datetime.now()
+
+                            total_crossings += 1
+
+                            event_data = {
+                                "vehicle_id": vehicle_id,
+                                "vehicle_type": vehicle_type,
+                                "vehicle_color": vehicle_color,
+                                "direction": direction,
+                                "timestamp": event_time
+                            }
+
+                            try:
+
+                                save_crossing_event(event_data)
+
+                                print(
+                                    f"Vehicle {vehicle_id} crossed "
+                                    f"{direction}: {vehicle_type} "
+                                    f"({vehicle_color})"
                                 )
 
-                            
+                            except Exception as error:
 
-                    previous_positions[track_id] = center_y
+                                print(
+                                    "Crossing database error:",
+                                    error
+                                )
 
-                # Draw vehicle bounding box
-                cv2.rectangle(
-                    annotated_frame,
-                    (x1, y1),
-                    (x2, y2),
-                    (0, 255, 0),
-                    2
-                )
+                            csv_writer.writerow([
+                                vehicle_id,
+                                vehicle_type,
+                                vehicle_color,
+                                direction,
+                                event_time.isoformat()
+                            ])
 
-                label = f"{vehicle_name} | {vehicle_color}"
+                            csv_file.flush()
 
-                if track_id is not None:
-                    label += f" ID:{track_id}"
+                    previous_positions[vehicle_id] = center_y
 
-                cv2.putText(
-                    annotated_frame,
-                    label,
-                    (x1, max(y1 - 10, 20)),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    (0, 255, 0),
-                    2
-                )
+                    # --------------------------------------------------
+                    # DRAW BOUNDING BOX
+                    # --------------------------------------------------
 
-                cv2.circle(
-                    annotated_frame,
-                    (center_x, center_y),
-                    4,
-                    (255, 0, 0),
-                    -1
-                )
+                    cv2.rectangle(
+                        annotated_frame,
+                        (x1, y1),
+                        (x2, y2),
+                        (0, 255, 0),
+                        2
+                    )
 
-        # Draw horizontal counting line
-        cv2.line(
-            annotated_frame,
-            (0, counting_line_y),
-            (width, counting_line_y),
-            (0, 0, 255),
-            3
-        )
+                    label = (
+                        f"{vehicle_type} | "
+                        f"{vehicle_color} | ID:{vehicle_id}"
+                    )
 
-        cv2.putText(
-            annotated_frame,
-            "VEHICLE COUNTING LINE",
-            (20, counting_line_y - 10),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.7,
-            (0, 0, 255),
-            2
-        )
+                    cv2.putText(
+                        annotated_frame,
+                        label,
+                        (x1, max(y1 - 10, 20)),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.55,
+                        (0, 255, 0),
+                        2
+                    )
 
-        # Display statistics
-        y = 30
+                    # Vehicle center
+                    cv2.circle(
+                        annotated_frame,
+                        (center_x, center_y),
+                        4,
+                        (255, 0, 0),
+                        -1
+                    )
 
-        cv2.putText(
-            annotated_frame,
-            f"Total unique vehicles: {len(vehicle_ids)}",
-            (20, y),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.7,
-            (0, 255, 255),
-            2
-        )
+            # --------------------------------------------------
+            # DRAW LIVE COUNTERS
+            # --------------------------------------------------
 
-        for name, count in vehicle_counts.items():
-            y += 28
             cv2.putText(
                 annotated_frame,
-                f"{name}: {count}",
-                (20, y),
+                f"Total Vehicles: {total_vehicles}",
+                (20, 35),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.8,
+                (0, 255, 255),
+                2
+            )
+
+            cv2.putText(
+                annotated_frame,
+                f"Crossings: {total_crossings}",
+                (20, 70),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.8,
+                (0, 255, 255),
+                2
+            )
+
+            cv2.putText(
+                annotated_frame,
+                f"Cars: {vehicle_counts['Car']}",
+                (20, 110),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.6,
                 (255, 255, 255),
                 2
             )
 
-        y += 28
-        cv2.putText(
-            annotated_frame,
-            f"Line crossings: {len(crossing_events)}",
-            (20, y),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.7,
-            (0, 255, 255),
-            2
-        )
+            cv2.putText(
+                annotated_frame,
+                f"Buses: {vehicle_counts['Bus']}",
+                (20, 140),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (255, 255, 255),
+                2
+            )
 
-        writer.write(annotated_frame)
+            cv2.putText(
+                annotated_frame,
+                f"Trucks: {vehicle_counts['Truck']}",
+                (20, 170),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (255, 255, 255),
+                2
+            )
 
-        cv2.imshow(
-            "Vehicle Analytics - Line Crossing",
-            annotated_frame
-        )
+            cv2.putText(
+                annotated_frame,
+                f"Motorcycles: {vehicle_counts['Motorcycle']}",
+                (20, 200),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (255, 255, 255),
+                2
+            )
 
-        if cv2.waitKey(1) & 0xFF == ord("q"):
-            break
+            # --------------------------------------------------
+            # SAVE OUTPUT VIDEO
+            # --------------------------------------------------
 
-    cap.release()
-    writer.release()
-    cv2.destroyAllWindows()
+            video_writer.write(annotated_frame)
 
-    # Save crossing events to CSV
-    with open(CSV_PATH, "w", newline="", encoding="utf-8") as file:
-        fieldnames = [
-            "vehicle_id",
-            "vehicle_type",
-            "vehicle_color",
-            "direction",
-            "timestamp"
-        ]
+            # --------------------------------------------------
+            # PUBLISH FRAME TO REACT
+            # --------------------------------------------------
 
-        csv_writer = csv.DictWriter(
-            file,
-            fieldnames=fieldnames
-        )
+            success, encoded_frame = cv2.imencode(
+                ".jpg",
+                annotated_frame,
+                [cv2.IMWRITE_JPEG_QUALITY, 85]
+            )
 
-        csv_writer.writeheader()
-        csv_writer.writerows(crossing_events)
+            if success:
 
-    print("\n========== VEHICLE ANALYTICS REPORT ==========")
-    print(f"Total unique vehicles: {len(vehicle_ids)}")
+                publish_frame(encoded_frame.tobytes())
 
-    for name, count in vehicle_counts.items():
-        print(f"{name}: {count}")
+            # --------------------------------------------------
+            # PUBLISH LIVE STATISTICS
+            # --------------------------------------------------
 
-    print(f"Total line crossings: {len(crossing_events)}")
-    print(f"Processed video: {OUTPUT_PATH}")
-    print(f"Crossing events CSV: {CSV_PATH}")
+            publish_stats({
 
-    print("\nVehicle analytics completed!")
+                "status": "running",
 
+                "total_vehicles": total_vehicles,
 
-if __name__ == "__main__":
-    main()
+                "cars": vehicle_counts["Car"],
+
+                "buses": vehicle_counts["Bus"],
+
+                "trucks": vehicle_counts["Truck"],
+
+                "motorcycles": vehicle_counts["Motorcycle"],
+
+                "total_crossings": total_crossings,
+
+                "active_vehicles": current_visible,
+
+                "vehicle_counts": vehicle_counts.copy()
+
+            })
+
+            # Small delay to avoid unnecessary CPU usage
+            time.sleep(0.001)
+
+    finally:
+
+        # --------------------------------------------------
+        # RELEASE RESOURCES
+        # --------------------------------------------------
+
+        cap.release()
+
+        video_writer.release()
+
+        csv_file.close()
+
+        print("Video resources released.")
+
+        print("Detection stopped.")
