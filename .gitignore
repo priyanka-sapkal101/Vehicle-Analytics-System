@@ -1,0 +1,32 @@
+@'
+# Python
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# Frontend
+node_modules/
+dist/
+
+# Secrets
+.env
+.env.*
+!.env.example
+auto.key
+auto.crt
+
+# Generated files
+outputs/
+Ultralytics/
+
+# Model weights and executables
+*.pt
+*.engine
+mediamtx.exe
+
+# IDE
+.vscode/
+.DS_Store
+Thumbs.db
+'@ | Set-Content -Encoding utf8 .gitignore

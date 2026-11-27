@@ -1,0 +1,23 @@
+
+[property]
+enable=1
+config-width=1920
+config-height=1080
+osd-mode=2
+display-font-size=12
+
+[line-crossing-stream-0]
+enable=1
+
+# Downward vehicle movement
+line-crossing-DOWN=960;500;960;700;0;594;1920;594
+
+# Upward vehicle movement
+line-crossing-UP=960;700;960;500;0;594;1920;594
+
+# COCO vehicle class IDs
+# Car=2, Motorcycle=3, Bus=5, Truck=7
+class-id=2;3;5;7
+
+extended=0
+mode=loose
